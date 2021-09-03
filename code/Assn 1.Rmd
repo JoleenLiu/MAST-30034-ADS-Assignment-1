@@ -1,0 +1,903 @@
+
+```{r}
+library(reshape2)
+library(ggplot2)
+library(pracma)
+library(dplyr)
+library(stats)
+library(R.matlab)
+library(MASS)
+library(plot.matrix)
+library(plotly)
+library(SAVER)
+```
+
+```{r}
+# Question 1
+AV<-c(0,20,0,0,0,0)
+IV<-c(30,45,60,40,40,40)
+d<-c(15,20,25,15,20,25)
+
+TC1<-rep(c(rep(1,d[1]), rep(0, IV[1]-d[1])),240/IV[1])
+TC2<-c(rep(0,AV[2]), rep(c(rep(1, d[2]), rep(0, IV[2]-d[2])), (240-AV[2])/IV[2]),
+       rep(1, d[2]), rep(0, (240-200-d[2])))
+TC3<-rep(c(rep(1, d[3]), rep(0, IV[3]-d[3])), 240/IV[3])
+TC4<-rep(c(rep(1, d[4]), rep(0, IV[4]-d[4])), 240/IV[4])
+TC5<-rep(c(rep(1, d[5]), rep(0, IV[5]-d[5])), 240/IV[5])
+TC6<-rep(c(rep(1, d[6]), rep(0, IV[6]-d[6])), 240/IV[6])
+
+tmpTC<-matrix(c(TC1,TC2,TC3,TC4,TC5,TC6),ncol=6)
+
+# Standardize TCs
+for (i in 1:6){
+  tmpTC[,i]<-(tmpTC[,i]-mean(tmpTC[,i]))/sd(tmpTC[,i])
+}
+
+# Plot TCs
+par(mfrow = c(2,3), cex = 0.5)
+plot(tmpTC[,1], type = 'l', ylab = 'TC1')
+plot(tmpTC[,2], type = 'l', ylab = 'TC2')
+plot(tmpTC[,3], type = 'l', ylab = 'TC3')
+plot(tmpTC[,4], type = 'l', ylab = 'TC4')
+plot(tmpTC[,5], type = 'l', ylab = 'TC5')
+plot(tmpTC[,6], type = 'l', ylab = 'TC6')
+
+# Show correlations
+TC<-data.frame(tmpTC[,1],tmpTC[,2],tmpTC[,3],tmpTC[,4],tmpTC[,5],tmpTC[,6])
+names(TC)<-c('TC1','TC2','TC3','TC4','TC5','TC6')
+TC<-as.matrix(TC)
+
+par(mfrow=c(1,1))
+plot(cor(TC), main = 'correlation of TCs', xlab = NA, ylab = NA)
+
+# Try normalizing TCs with l-2norm and plot them
+TC1_norm<-TC1/sqrt(sum(TC1^2))
+TC2_norm<-TC2/sqrt(sum(TC2^2))
+TC3_norm<-TC3/sqrt(sum(TC3^2))
+TC4_norm<-TC4/sqrt(sum(TC4^2))
+TC5_norm<-TC5/sqrt(sum(TC5^2))
+TC6_norm<-TC6/sqrt(sum(TC6^2))
+
+# Plot TC_norm
+par(mfrow = c(2,3), cex = 0.5)
+plot(TC1_norm, type = 'l')
+plot(TC2_norm, type = 'l')
+plot(TC3_norm, type = 'l')
+plot(TC4_norm, type = 'l')
+plot(TC5_norm, type = 'l')
+plot(TC6_norm, type = 'l')
+
+```
+```{r}
+tmpSM<-array(0, c(6,21,21))
+tmpSM[1,2:6,2:6] = 1
+tmpSM[2,2:6,15:19] = 1
+tmpSM[3,8:13,2:6] = 1
+tmpSM[4,8:13,15:19] = 1
+tmpSM[5,15:19,2:6] = 1
+tmpSM[6,15:19,15:19] = 1
+
+par(mfrow=c(2,3),cex=0.5)
+plot(tmpSM[1,,],border = NA,ylab = NA,main = 'SM1')
+plot(tmpSM[2,,],border = NA,ylab = NA,main = 'SM2')
+plot(tmpSM[3,,],border = NA,ylab = NA,main = 'SM3')
+plot(tmpSM[4,,],border = NA,ylab = NA,main = 'SM4')
+plot(tmpSM[5,,],border = NA,ylab = NA,main = 'SM5')
+plot(tmpSM[6,,],border = NA,ylab = NA,main = 'SM6')
+
+SM<-data.frame(matrix(c(c(tmpSM[1,,]),c(tmpSM[2,,]),c(tmpSM[3,,]),c(tmpSM[4,,]),c(tmpSM[5,,]),
+             c(tmpSM[6,,])),6, 441, byrow = T), row.names = c('SM1', 'SM2', 'SM3', 'SM4', 'SM5', 'SM6'))
+SM<-as.matrix(SM)
+
+par(mfrow=c(1,1))
+plot(cor(t(SM)),main='correlation of SMs')
+```
+```{r}
+# Generate noise points for TCs and SMs
+set.seed(100)
+noise_TC<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+
+# Show the correlation and distribution of TCs and SMs
+par(mfrow=c(1,1))
+plot(cor(noise_TC), main='correlation of noise_TC')
+plot(cor(t(noise_SM)),  main='correlation of noise_SM')
+hist(noise_TC, main='distribution of noise_TC')
+hist(noise_SM, main='distribution of noise_SM')
+```
+```{r}
+# noise product and its correlation map
+noise_prod<-noise_TC%*%noise_SM
+plot(cor(noise_prod), border = NA)
+```
+```{r}
+# Create the synthetic dataset X
+X<-(TC+noise_TC)%*%(SM+noise_SM)
+# The residuals of the model
+m1<-TC%*%noise_SM
+m2<-noise_TC%*%SM
+```
+
+```{r}
+# Plot the variables in X and their variances
+set.seed(100)
+sample<-data.frame(index=1:240, X[,sample.int(441,100)])
+ggplot(melt(sample, id.vars='index'), aes(x=index,y=value,col=variable))+geom_line()
+plot(cov(X)[1,],ylab='variance of X')
+```
+```{r}
+# Standardize X
+X<-data.frame(X)
+X_s<-X%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+```
+
+
+
+```{r}
+# Question 2
+TC<-as.matrix(TC)
+X_s<-as.matrix(X_s)
+A_LSR<-solve(t(TC)%*%TC)%*%t(TC)%*%X_s
+D_LSR<-X_s%*%t(A_LSR)
+rownames(A_LSR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+
+par(mfrow=c(2,2),cex=0.5)
+reshapeA_LSR1<-A_LSR[1,]
+dim(reshapeA_LSR1)<-c(21,21)
+plot(reshapeA_LSR1,border=NA,ylab=NA,xlab=NA,main='A_LSR 1')
+plot(D_LSR[,1],type='l',ylab=NA,xlab=NA,main='D_LSR 1')
+
+reshapeA_LSR2<-A_LSR[2,]
+dim(reshapeA_LSR2)<-c(21,21)
+plot(reshapeA_LSR2,border=NA,ylab=NA,xlab=NA,main='A_LSR 2')
+plot(D_LSR[,2],type='l',ylab=NA,xlab=NA,main='D_LSR 2')
+
+par(mfrow=c(2,2),cex=0.5)
+reshapeA_LSR3<-A_LSR[3,]
+dim(reshapeA_LSR3)<-c(21,21)
+plot(reshapeA_LSR3,border=NA,ylab=NA,xlab=NA,main='A_LSR 3')
+plot(D_LSR[,3],type='l',ylab=NA,xlab=NA,main='D_LSR 3')
+
+reshapeA_LSR4<-A_LSR[4,]
+dim(reshapeA_LSR4)<-c(21,21)
+plot(reshapeA_LSR4,border=NA,ylab=NA,xlab=NA,main='A_LSR 4')
+plot(D_LSR[,4],type='l',ylab=NA,xlab=NA,main='D_LSR 4')
+
+par(mfrow=c(2,2),cex=0.5)
+reshapeA_LSR5<-A_LSR[5,]
+dim(reshapeA_LSR5)<-c(21,21)
+plot(reshapeA_LSR5,border=NA,ylab=NA,xlab=NA,main='A_LSR 5')
+plot(D_LSR[,5],type='l',ylab=NA,xlab=NA,main='D_LSR 5')
+
+reshapeA_LSR6<-A_LSR[6,]
+dim(reshapeA_LSR6)<-c(21,21)
+plot(reshapeA_LSR6,border=NA,ylab=NA,xlab=NA,main='A_LSR 6')
+plot(D_LSR[,6],type='l',ylab=NA,xlab=NA,main='D_LSR 6')
+```
+```{r}
+# Scatter plot between 3rd column of D_LSR and 30th column of standardized X
+par(mfrow=c(1,1))
+plot(D_LSR[,3], X_s[,30], main='D_LSR[,3] vs X_s[,30]', xlab='3rd col of D_LSR', 
+     ylab='30th col of standardised X')
+plot(D_LSR[,4], X_s[,30], main='D_LSR[,4] vs X_s[,30]', xlab='4rd col of D_LSR', 
+     ylab='30th col of standardised X')
+```
+```{r}
+V<-441
+lambda<-0.5
+lambda_hat<-lambda*V
+A_RR<-solve(t(TC)%*%TC+lambda_hat*diag(dim(t(TC)%*%TC)[1]))%*%t(TC)%*%X_s
+D_RR<-X_s%*%t(A_RR)
+rownames(A_RR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+
+CM_TLSR<-cor(TC, D_LSR)
+CM_TRR<-cor(TC, D_RR)
+
+c_TLSR<-as.matrix(diag(CM_TLSR))
+c_TRR<-as.matrix(diag(CM_TRR))
+
+sum(c_TLSR)
+sum(c_TRR)
+
+cat('\n')
+isTRUE(sum(c_TRR) > sum(c_TLSR))
+```
+```{r}
+lambda<-1000
+lambda_hat<-lambda*V
+A_RR_ex<-solve(t(TC)%*%TC+lambda_hat*diag(dim(t(TC)%*%TC)[1]))%*%t(TC)%*%X_s
+
+par(mfrow=c(1,1))
+plot(A_LSR[1,], col='blue', ylab='A_RR[1,] and A_LSR[1,]', main='A_RR[1,] vs A_LSR[1,]')
+points(A_RR_ex[1,], col='red')
+
+par(mfrow=c(1,1))
+plot(A_RR_ex[1,], col='red', ylab='A_RR[1,]', main='A_RR[1,]')
+```
+
+
+
+```{r}
+nsrcs<-6
+N<-240
+x1<-21
+x2<-21
+rho<-seq(from = 0, to = 1, by = 0.05)
+step<-1/(norm(TC %*% t(TC)) * 1.1)
+thr<-rho*N*step
+Ao<-matrix(0, nsrcs, 1)
+A<-matrix(0, nsrcs, 1)
+A_LR<-matrix(0, nsrcs, x1*x2)
+A_LR_huge<-array(0, c(21, 6, 441))
+D_LR_huge<-array(0, c(21, 240, 6))
+MSE_huge<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  D_LR<-X_s%*%t(A_LR)
+  MSE<-sum(sum(t(X_s-D_LR%*%A_LR)%*%(X_s-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s-D_LR%*%A_LR), type='F')^2/(N*V)
+  A_LR_huge[j,,]<-A_LR
+  D_LR_huge[j,,]<-D_LR
+  MSE_huge[j]<-MSE
+}
+
+sum(MSE_huge)
+```
+```{r}
+set.seed(1)
+noise_TC_n1<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n1<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n1<-(TC+noise_TC_n1)%*%(SM+noise_SM_n1)
+X_n1<-data.frame(X_n1)
+X_s_n1<-X_n1%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n1<-as.matrix(X_s_n1)
+
+A_LR_huge_1<-array(0, c(21, 6, 441))
+D_LR_huge_1<-array(0, c(21, 240, 6))
+MSE_huge_1<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n1[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n1[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  D_LR<-X_s_n1%*%t(A_LR)
+  MSE<-sum(sum(t(X_s_n1-D_LR%*%A_LR)%*%(X_s_n1-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n1-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_1[j,,]<-A_LR
+  D_LR_huge_1[j,,]<-D_LR
+  MSE_huge_1[j]<-MSE
+}
+```
+
+```{r}
+set.seed(2)
+noise_TC_n2<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n2<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n2<-(TC+noise_TC_n2)%*%(SM+noise_SM_n2)
+X_n2<-data.frame(X_n2)
+X_s_n2<-X_n2%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n2<-as.matrix(X_s_n2)
+
+A_LR_huge_2<-array(0, c(21, 6, 441))
+D_LR_huge_2<-array(0, c(21, 240, 6))
+MSE_huge_2<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n2[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n2[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n2%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n2-D_LR%*%A_LR)%*%(X_s_n2-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n2-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_2[j,,]<-A_LR
+  D_LR_huge_2[j,,]<-D_LR
+  MSE_huge_2[j]<-MSE
+}
+```
+
+```{r}
+set.seed(3)
+noise_TC_n3<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n3<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n3<-(TC+noise_TC_n3)%*%(SM+noise_SM_n3)
+X_n3<-data.frame(X_n3)
+X_s_n3<-X_n3%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n3<-as.matrix(X_s_n3)
+
+A_LR_huge_3<-array(0, c(21, 6, 441))
+D_LR_huge_3<-array(0, c(21, 240, 6))
+MSE_huge_3<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n3[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n3[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n3%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n3-D_LR%*%A_LR)%*%(X_s_n3-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n3-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_3[j,,]<-A_LR
+  D_LR_huge_3[j,,]<-D_LR
+  MSE_huge_3[j]<-MSE
+}
+```
+
+```{r}
+set.seed(4)
+noise_TC_n4<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n4<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n4<-(TC+noise_TC_n4)%*%(SM+noise_SM_n4)
+X_n4<-data.frame(X_n4)
+X_s_n4<-X_n4%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n4<-as.matrix(X_s_n4)
+
+A_LR_huge_4<-array(0, c(21, 6, 441))
+D_LR_huge_4<-array(0, c(21, 240, 6))
+MSE_huge_4<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n4[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n4[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n4%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n4-D_LR%*%A_LR)%*%(X_s_n4-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n4-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_4[j,,]<-A_LR
+  D_LR_huge_4[j,,]<-D_LR
+  MSE_huge_4[j]<-MSE
+}
+```
+
+```{r}
+set.seed(5)
+noise_TC_n5<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n5<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n5<-(TC+noise_TC_n5)%*%(SM+noise_SM_n5)
+X_n5<-data.frame(X_n5)
+X_s_n5<-X_n5%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n5<-as.matrix(X_s_n5)
+
+A_LR_huge_5<-array(0, c(21, 6, 441))
+D_LR_huge_5<-array(0, c(21, 240, 6))
+MSE_huge_5<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n5[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n5[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n5%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n5-D_LR%*%A_LR)%*%(X_s_n5-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n5-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_5[j,,]<-A_LR
+  D_LR_huge_5[j,,]<-D_LR
+  MSE_huge_5[j]<-MSE
+}
+```
+
+```{r}
+set.seed(6)
+noise_TC_n6<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n6<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n6<-(TC+noise_TC_n6)%*%(SM+noise_SM_n6)
+X_n6<-data.frame(X_n6)
+X_s_n6<-X_n6%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n6<-as.matrix(X_s_n6)
+
+A_LR_huge_6<-array(0, c(21, 6, 441))
+D_LR_huge_6<-array(0, c(21, 240, 6))
+MSE_huge_6<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n6[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n6[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n6%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n6-D_LR%*%A_LR)%*%(X_s_n6-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n6-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_6[j,,]<-A_LR
+  D_LR_huge_6[j,,]<-D_LR
+  MSE_huge_6[j]<-MSE
+}
+```
+
+```{r}
+set.seed(7)
+noise_TC_n7<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n7<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n7<-(TC+noise_TC_n7)%*%(SM+noise_SM_n7)
+X_n7<-data.frame(X_n7)
+X_s_n7<-X_n7%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n7<-as.matrix(X_s_n7)
+
+A_LR_huge_7<-array(0, c(21, 6, 441))
+D_LR_huge_7<-array(0, c(21, 240, 6))
+MSE_huge_7<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n7[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n7[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n7%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n7-D_LR%*%A_LR)%*%(X_s_n7-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n7-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_7[j,,]<-A_LR
+  D_LR_huge_7[j,,]<-D_LR
+  MSE_huge_7[j]<-MSE
+}
+```
+
+```{r}
+set.seed(8)
+noise_TC_n8<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n8<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n8<-(TC+noise_TC_n8)%*%(SM+noise_SM_n8)
+X_n8<-data.frame(X_n8)
+X_s_n8<-X_n8%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n8<-as.matrix(X_s_n8)
+
+A_LR_huge_8<-array(0, c(21, 6, 441))
+D_LR_huge_8<-array(0, c(21, 240, 6))
+MSE_huge_8<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n8[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n8[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n8%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n8-D_LR%*%A_LR)%*%(X_s_n8-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n8-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_8[j,,]<-A_LR
+  D_LR_huge_8[j,,]<-D_LR
+  MSE_huge_8[j]<-MSE
+}
+```
+
+```{r}
+set.seed(9)
+noise_TC_n9<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n9<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n9<-(TC+noise_TC_n9)%*%(SM+noise_SM_n9)
+X_n9<-data.frame(X_n9)
+X_s_n9<-X_n9%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n9<-as.matrix(X_s_n9)
+
+A_LR_huge_9<-array(0, c(21, 6, 441))
+D_LR_huge_9<-array(0, c(21, 240, 6))
+MSE_huge_9<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n9[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n9[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n9%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n9-D_LR%*%A_LR)%*%(X_s_n9-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n9-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_9[j,,]<-A_LR
+  D_LR_huge_9[j,,]<-D_LR
+  MSE_huge_9[j]<-MSE
+}
+```
+
+```{r}
+set.seed(10)
+noise_TC_n10<-matrix(rnorm(240*6, 0, sqrt(0.25)),240,6)
+noise_SM_n10<-matrix(rnorm(6*441, 0, sqrt(0.015)),6,441)
+X_n10<-(TC+noise_TC_n10)%*%(SM+noise_SM_n10)
+X_n10<-data.frame(X_n10)
+X_s_n10<-X_n10%>%mutate_if(is.numeric,~scale(.)%>%as.vector)
+X_s_n10<-as.matrix(X_s_n10)
+
+A_LR_huge_10<-array(0, c(21, 6, 441))
+D_LR_huge_10<-array(0, c(21, 240, 6))
+MSE_huge_10<-matrix(0, 21)
+
+for (j in 1:length(rho)) {
+  
+  for (k in 1:(x1*x2)) {
+    A<-Ao+step*(t(TC) %*% (X_s_n10[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+  
+    for (i in 1:10) {
+      Ao<-A
+      A<-Ao+step * (t(TC)%*%(X_s_n10[,k]-(TC%*%Ao)))
+      A<-(1/(1+thr[j])) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr[j]))
+    }
+    A_LR[,k]<-A
+    
+  }
+  D_LR<-X_s_n10%*%t(A_LR)
+  rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+  MSE<-sum(sum(t(X_s_n10-D_LR%*%A_LR)%*%(X_s_n10-D_LR%*%A_LR)))/(N*V)
+  #MSE<-norm((X_s_n10-D_LR%*%A_LR), type='F')^2/(N*V)
+  
+  A_LR_huge_10[j,,]<-A_LR
+  D_LR_huge_10[j,,]<-D_LR
+  MSE_huge_10[j]<-MSE
+}
+```
+
+```{r}
+MSE_matrix<-as.matrix(data.frame(MSE_huge_1, MSE_huge_2, MSE_huge_3, MSE_huge_4, 
+                                 MSE_huge_5, MSE_huge_6, MSE_huge_7, MSE_huge_8, 
+                                 MSE_huge_9, MSE_huge_10))
+
+MSE_AVG<-array(0, 21)
+for (i in 1:21){
+  avg<-mean(MSE_matrix[i,])
+  MSE_AVG[i]<-avg
+}
+
+MSE_AVG_df<-data.frame(index = 1:21, MSE_AVG)
+ggplot(MSE_AVG_df, aes(x = index, y = MSE_AVG)) + geom_point() +geom_line()+ scale_x_discrete(limits = factor(seq(1, 21, 1))) + geom_vline(xintercept = which(MSE_AVG == min(MSE_AVG)), linetype = 'dashed', color = 'red') + labs(x = 'N th rho', title = 'Average MSE at 21 rho values over 10 realisations')
+```
+
+
+```{r}
+# Get the minimum MSE over 10 realisations and the corresponding index of the rho value
+min(MSE_AVG)
+which(MSE_AVG == min(MSE_AVG))
+```
+```{r}
+# The 13th rho in the rho sequence is 0.6
+rho<-seq(from = 0, to = 1, by = 0.05)
+rho[13]
+```
+```{r}
+rho<-0.60
+thr<-rho*N*step
+Ao<-matrix(0, nsrcs, 1)
+A<-matrix(0, nsrcs, 1)
+A_LR<-matrix(0, nsrcs, x1*x2)
+
+for (k in 1:(x1*x2)) {
+  A<-Ao+step*(t(TC) %*% (X_s[,k]-(TC%*%Ao)))
+  A<-(1/(1+thr)) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr))
+  
+  for (i in 1:10) {
+    Ao<-A
+    A<-Ao+step * (t(TC)%*%(X_s[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr)) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr))
+  }
+  A_LR[,k]<-A
+    
+}
+rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+D_LR<-X_s%*%t(A_LR)
+colnames(D_LR)<-c('TC1', 'TC2', 'TC3', 'TC4', 'TC5', 'TC6')
+MSE<-sum(sum(t(X_s-D_LR%*%A_LR)%*%(X_s-D_LR%*%A_LR)))/(N*V)
+#MSE<-norm((X_s-D_LR%*%A_LR), type='F')^2/(N*V)
+MSE
+```
+```{r}
+rho<-0.6202
+thr<-rho*N*step
+Ao<-matrix(0, nsrcs, 1)
+A<-matrix(0, nsrcs, 1)
+A_LR<-matrix(0, nsrcs, x1*x2)
+
+for (k in 1:(x1*x2)) {
+  A<-Ao+step*(t(TC) %*% (X_s[,k]-(TC%*%Ao)))
+  A<-(1/(1+thr)) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr))
+  
+  for (i in 1:10) {
+    Ao<-A
+    A<-Ao+step * (t(TC)%*%(X_s[,k]-(TC%*%Ao)))
+    A<-(1/(1+thr)) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr))
+  }
+  A_LR[,k]<-A
+    
+}
+rownames(A_LR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+D_LR<-X_s%*%t(A_LR)
+colnames(D_LR)<-c('TC1', 'TC2', 'TC3', 'TC4', 'TC5', 'TC6')
+MSE<-sum(sum(t(X_s-D_LR%*%A_LR)%*%(X_s-D_LR%*%A_LR)))/(N*V)
+#MSE<-norm((X_s-D_LR%*%A_LR), type='F')^2/(N*V)
+MSE
+```
+```{r}
+CM_TRR<-cor(TC, D_RR)
+CM_SRR<-cor(t(SM), t(A_RR))
+CM_TLR<-cor(TC, D_LR)
+CM_SLR<-cor(t(SM), t(A_LR))
+
+c_TRR<-as.matrix(diag(CM_TRR))
+c_SRR<-as.matrix(diag(CM_SRR))
+c_TLR<-as.matrix(diag(CM_TLR))
+c_SLR<-as.matrix(diag(CM_SLR))
+
+sum(c_TRR)
+sum(c_SRR)
+sum(c_TLR)
+sum(c_SLR)
+
+cat('\n')
+isTRUE(sum(c_TLR) > sum(c_TRR))
+isTRUE(sum(c_SLR) > sum(c_SRR))
+```
+```{r}
+par(mfrow=c(2,2), cex = 0.5)
+plot(CM_TRR, xlab = NA, ylab = NA)
+plot(CM_SRR, xlab = NA, ylab = NA)
+plot(CM_TLR, xlab = NA, ylab = NA)
+plot(CM_SLR, xlab = NA, ylab = NA)
+```
+```{r}
+par(mfrow = c(2,2), cex = 0.5)
+reshapeA_RR1<-A_RR[1,]
+dim(reshapeA_RR1)<-c(21,21)
+reshapeA_LR1<-A_LR[1,]
+dim(reshapeA_LR1)<-c(21,21)
+plot(reshapeA_RR1, type = 'l', border = NA, ylab = NA,xlab = NA,main ='A_RR 1')
+plot(D_RR[,1], type = 'l', ylab = NA,xlab = NA,main ='D_RR 1')
+plot(reshapeA_LR1, type = 'l', border = NA, ylab = NA,xlab = NA,main ='A_LR 1')
+plot(D_LR[,1], type = 'l', ylab = NA,xlab = NA,main ='D_LR 1')
+
+par(mfrow = c(2,2), cex = 0.5)
+reshapeA_RR2<-A_RR[2,]
+dim(reshapeA_RR2)<-c(21,21)
+reshapeA_LR2<-A_LR[2,]
+dim(reshapeA_LR2)<-c(21,21)
+plot(reshapeA_RR2, type = 'l', border = NA, ylab = NA,xlab = NA,main ='A_RR 2')
+plot(D_RR[,2], type = 'l',  ylab = NA,xlab = NA,main ='D_RR 2')
+plot(reshapeA_LR2, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_LR 2')
+plot(D_LR[,2], type = 'l',  ylab = NA,xlab = NA,main ='D_LR 2')
+
+par(mfrow = c(2,2), cex = 0.5)
+reshapeA_RR3<-A_RR[3,]
+dim(reshapeA_RR3)<-c(21,21)
+reshapeA_LR3<-A_LR[3,]
+dim(reshapeA_LR3)<-c(21,21)
+plot(reshapeA_RR3, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_RR 3')
+plot(D_RR[,3], type = 'l',  ylab = NA,xlab = NA,main ='D_RR 3')
+plot(reshapeA_LR3, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_LR 3')
+plot(D_LR[,3], type = 'l',  ylab = NA,xlab = NA,main ='D_LR 3')
+
+par(mfrow = c(2,2), cex = 0.5)
+reshapeA_RR4<-A_RR[4,]
+dim(reshapeA_RR4)<-c(21,21)
+reshapeA_LR4<-A_LR[4,]
+dim(reshapeA_LR4)<-c(21,21)
+plot(reshapeA_RR4, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_RR 4')
+plot(D_RR[,4], type = 'l',  ylab = NA,xlab = NA,main ='D_RR 4')
+plot(reshapeA_LR4, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_LR 4')
+plot(D_LR[,4], type = 'l',  ylab = NA,xlab = NA,main ='D_LR 4')
+
+par(mfrow = c(2,2), cex = 0.5)
+reshapeA_RR5<-A_RR[5,]
+dim(reshapeA_RR5)<-c(21,21)
+reshapeA_LR5<-A_LR[5,]
+dim(reshapeA_LR5)<-c(21,21)
+plot(reshapeA_RR5, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_RR 5')
+plot(D_RR[,5], type = 'l',  ylab = NA,xlab = NA,main ='D_RR 5')
+plot(reshapeA_LR5, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_LR 5')
+plot(D_LR[,5], type = 'l',  ylab = NA,xlab = NA,main ='D_LR 5')
+
+par(mfrow = c(2,2), cex = 0.5)
+reshapeA_RR6<-A_RR[6,]
+dim(reshapeA_RR6)<-c(21,21)
+reshapeA_LR6<-A_LR[6,]
+dim(reshapeA_LR6)<-c(21,21)
+plot(reshapeA_RR6, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_RR 6')
+plot(D_RR[,6], type = 'l',  ylab = NA,xlab = NA,main ='D_RR 6')
+plot(reshapeA_LR6, type = 'l', border = NA,  ylab = NA,xlab = NA,main ='A_LR 6')
+plot(D_LR[,6], type = 'l',  ylab = NA,xlab = NA,main ='D_LR 6')
+```
+```{r}
+Zbv<-svd(TC, 6)
+Z<-Zbv$u
+colnames(Z)<-c('PC1','PC2','PC3','PC4','PC5','PC6')
+eiv<-Zbv$v
+colnames(eiv)<-c('PC1','PC2','PC3','PC4','PC5','PC6')
+rownames(eiv)<-c('TC1','TC2','TC3','TC4','TC5','TC6')
+plot(eiv, main = 'eigenvalues of PCs')
+```
+```{r}
+D.pca<-prcomp(TC, center = F, scale. = F)
+D.pca
+cat('\n\n\n')
+summary(D.pca)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(Z[,1], type = 'l', ylab = 'PC1')
+plot(TC[,1],  type = 'l', ylab = 'TC1')
+
+plot(Z[,2], type = 'l', ylab = 'PC2')
+plot(TC[,2],  type = 'l', ylab = 'TC2')
+
+par(mfrow=c(2,2))
+plot(Z[,3], type = 'l', ylab = 'PC3')
+plot(TC[,3],  type = 'l', ylab = 'TC3')
+
+plot(Z[,4], type = 'l', ylab = 'PC4')
+plot(TC[,4],  type = 'l', ylab = 'TC4')
+
+par(mfrow=c(2,2))
+plot(Z[,5], type = 'l', ylab = 'PC5')
+plot(TC[,5],  type = 'l', ylab = 'TC5')
+
+plot(Z[,6], type = 'l', ylab = 'PC6')
+plot(TC[,6], type = 'l', ylab = 'TC6')
+
+```
+```{r}
+nsrcs<-6
+N<-240
+x1<-21
+x2<-21
+rho<-0.001
+step<-1/(norm(Z %*% t(Z)) * 1.1)
+thr<-rho*N*step
+Ao<-matrix(0, nsrcs, 1)
+A<-matrix(0, nsrcs, 1)
+A_PCR<-matrix(0, nsrcs, x1*x2)
+
+for (k in 1:(x1*x2)) {
+  A<-Ao+step*(t(Z) %*% (X_s[,k]-(Z%*%Ao)))
+  A<-(1/(1+thr)) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr))
+  
+  for (i in 1:10) {
+    Ao<-A
+    A<-Ao+step * (t(Z)%*%(X_s[,k]-(Z%*%Ao)))
+    A<-(1/(1+thr)) * (sign(A)*pmax(replicate(nsrcs, 0), abs(A)-thr))
+  }
+  A_PCR[,k]<-A
+}
+D_PCR<-X_s%*%t(A_PCR)
+rownames(A_PCR)<-c('SM1','SM2','SM3','SM4','SM5','SM6')
+colnames(D_PCR)<-c('TC1', 'TC2', 'TC3', 'TC4', 'TC5', 'TC6')
+
+```
+
+```{r}
+par(mfrow=c(2,2), cex = 0.5)
+reshapeA_PCR1<-A_PCR[1,]
+reshapeA_PCR2<-A_PCR[2,]
+dim(reshapeA_PCR1)<-c(21,21)
+dim(reshapeA_PCR2)<-c(21,21)
+plot(reshapeA_PCR1, border = NA, ylab = NA, xlab = NA, main = 'A_PCR 1')
+plot(D_PCR[,1], type = 'l', ylab = NA, xlab = NA, main = 'D_PCR 1')
+plot(reshapeA_PCR2, border = NA, ylab = NA, xlab = NA, main = 'A_PCR 2')
+plot(D_PCR[,2], type = 'l', ylab = NA, xlab = NA, main = 'D_PCR 2')
+
+par(mfrow=c(2,2), cex = 0.5)
+reshapeA_PCR3<-A_PCR[3,]
+reshapeA_PCR4<-A_PCR[4,]
+dim(reshapeA_PCR3)<-c(21,21)
+dim(reshapeA_PCR4)<-c(21,21)
+plot(reshapeA_PCR3, border = NA, ylab = NA, xlab = NA, main = 'A_PCR 3')
+plot(D_PCR[,3], type = 'l', ylab = NA, xlab = NA, main = 'D_PCR 3')
+plot(reshapeA_PCR4, border = NA, ylab = NA, xlab = NA, main = 'A_PCR 4')
+plot(D_PCR[,4], type = 'l', ylab = NA, xlab = NA, main = 'D_PCR 4')
+
+par(mfrow=c(2,2), cex = 0.5)
+reshapeA_PCR5<-A_PCR[5,]
+reshapeA_PCR6<-A_PCR[6,]
+dim(reshapeA_PCR5)<-c(21,21)
+dim(reshapeA_PCR6)<-c(21,21)
+plot(reshapeA_PCR5, border = NA, ylab = NA, xlab = NA , main = 'A_PCR 5')
+plot(D_PCR[,5], type = 'l', ylab = NA, xlab = NA, main = 'D_PCR 5')
+plot(reshapeA_PCR6, border = NA, ylab = NA, xlab = NA, main = 'A_PCR 6')
+plot(D_PCR[,6], type = 'l', ylab = NA, xlab = NA, main = 'D_PCR 6')
+```
